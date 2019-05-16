@@ -13,8 +13,6 @@
 	msgLength: DS.B 1
 	current: DS.B 1
 	
-	time_chars: DC.B 'hhmmssmmddyy'
-	
 	current_time_position: DS.B 1
 	write_position: DS.B 1
 	time_write_position: DS.B 1
@@ -26,6 +24,8 @@
 	TIME_FLAG: DS.B 1
 	IIC_FLAG: DS.B 1
 	
+	timedate: DS.B 32
+	
 	
 	ORG $E000
 	
@@ -34,9 +34,8 @@ RS			EQU		1	;PORTA BIT 1
 
 
 chars DC.B '0123456789ABCDEF'
-time DC.B 'Time is hh:mm:ss'
-date  DC.B 'Date is mm/dd/yy'
-replacement DC.B $8, $9, $B, $C, $E, $F, $8, $9, $B, $C, $E, $F
+base DC.B 'Time is hh:mm:ssDate is mm/dd/yy'
+replacement DC.B $8, $9, $B, $C, $E, $F, $18, $19, $1B, $1C, $1E, $1F
 			
 main:
 	_Startup:
@@ -68,6 +67,18 @@ main:
 				CLR		PTAD
 				CLR		PTBD
 				
+				CLRH ;shift the base screen into ram to be modified
+				CLRX ;for some reason, this is required if not in debug mode
+				;when base message is stored in RAM and not in debug, it prints garbage
+				;this fixes that
+				loadRAM:
+					LDA base,X
+					STA timedate,X
+					INCX
+					CPX #$20
+					BNE loadRAM 
+					
+				
 				LDA #0
 				STA IIC_FLAG
 				STA current_time_position
@@ -87,14 +98,19 @@ mainLoop:
 				LDA IIC_msg
 				JSR convertHexToChars
 				LDX current_time_position
+				LDX replacement,X
 				LDA tens_char
-				STA time_chars,X
-				INCX
+				STA timedate,X
+				INC current_time_position
+				LDX current_time_position
+				LDX replacement,X
 				LDA ones_char
-				STA time_chars,X
-				INCX
-				STX current_time_position
+				STA timedate,X
+				INC current_time_position
 				JSR LCD_Write_Time_Screen
+				
+				;write directly to time/date
+				
 				
 				LDA current_time_position
 				CMP #$C
@@ -127,72 +143,35 @@ convertHexToChars:
 				
 				RTS
 				
-loadTime:
-				LDA IIC_msg
+RETURN:
+				RTS
 				
+Write_Line:
+				LDX write_position
+				LDA timedate,X
+				JSR LCD_WRITE
+				INCX
+				STX write_position
+				CPX #$10
+				BEQ RETURN
+				CPX #$20
+				BEQ RETURN
+				BRA Write_Line
 				
 LCD_Write_Time_Screen:
 				CLR write_position
-				CLR time_write_position
 				LDA #$80
 				JSR LCD_ADDR
 				CLRH
 				CLRX
-				BRA LINE1
-				Write_Time:
-					LDX time_write_position
-					LDA time_chars,X
-					JSR LCD_WRITE
-					INCX
-					STX time_write_position
-					INC write_position ; increment cursor
-					
-				LINE1:
-					LDA write_position
-					LDX time_write_position
-					CMP replacement,X
-					BEQ Write_Time
-					CMP #$10
-					BEQ Next_Line ; go to next line
-					LDX write_position
-					LDA time,X
-					JSR LCD_WRITE
-					INCX
-					STX write_position
-					CPX #$10
-					BNE LINE1
-				Next_Line:
+				JSR Write_Line
+				;Next_Line:
 					LDA #$C0
 					JSR LCD_ADDR
 					CLRH
 					CLRX
-					CLR write_position
-					BRA LINE2
-				Write_Date:
-					LDX time_write_position
-					LDA time_chars,X
-					JSR LCD_WRITE
-					INCX
-					STX time_write_position
-					INC write_position ; increment cursor
-					
-				LINE2:
-					LDA write_position
-					LDX time_write_position
-					CMP replacement,X
-					BEQ Write_Date
-					CMP #$10
-					BEQ Finish ; go to next line
-					LDX write_position
-					LDA date,X
-					JSR LCD_WRITE
-					INCX
-					STX write_position
-					CPX #$10
-					BNE LINE2
-					
-				Finish:
-					RTS
+				JSR Write_Line
+				RTS
 					
 				
 				
