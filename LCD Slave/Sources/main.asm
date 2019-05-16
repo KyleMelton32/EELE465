@@ -11,16 +11,19 @@
 	IIC_addr: DS.B 1
 	IIC_msg: DS.B 1    ; enable 32 bit transmission
 	msgLength: DS.B 1
-	current: DS.B 1		
+	current: DS.B 1
 	
-	MSG1: DS.B 1
-	HOUR: DS.B 1
-	MINUTE: DS.B 1
-	SECOND: DS.B 1
-	MONTH: DS.B 1
-	DAY: DS.B 1
-	YEAR: DS.B 1
-	CURRENT_POSITION: DS.B 1
+	time_chars: DC.B 'hhmmssmmddyy'
+	
+	current_time_position: DS.B 1
+	write_position: DS.B 1
+	time_write_position: DS.B 1
+
+	tens_char: DS.B 1
+	ones_char: DS.B 1
+	
+	
+	TIME_FLAG: DS.B 1
 	IIC_FLAG: DS.B 1
 	
 	
@@ -31,8 +34,9 @@ RS			EQU		1	;PORTA BIT 1
 
 
 chars DC.B '0123456789ABCDEF'
-time DC.B 'Time is hh/mm/ss'
+time DC.B 'Time is hh:mm:ss'
 date  DC.B 'Date is mm/dd/yy'
+replacement DC.B $8, $9, $B, $C, $E, $F, $8, $9, $B, $C, $E, $F
 			
 main:
 	_Startup:
@@ -65,208 +69,130 @@ main:
 				CLR		PTBD
 				
 				LDA #0
-				STA $121
+				STA IIC_FLAG
+				STA current_time_position
+				STA TIME_FLAG
 				
 				JSR LCD_Startup
 				JSR LCD_Write_Time_Screen
-				JSR USER_TIME_LOOP
 ;---------------------------------------------------------------------------
 mainLoop:
-
+				LDA IIC_FLAG
+				ADD #$0
+				CMP #0
+				BEQ mainLoop
+				INC TIME_FLAG
+				CLR IIC_FLAG
 				
-				;;TODO load i2x message into x
+				LDA IIC_msg
+				JSR convertHexToChars
+				LDX current_time_position
+				LDA tens_char
+				STA time_chars,X
+				INCX
+				LDA ones_char
+				STA time_chars,X
+				INCX
+				STX current_time_position
+				JSR LCD_Write_Time_Screen
 				
-				
-				
+				LDA current_time_position
+				CMP #$C
+				BEQ reset_position
 				
 				BRA mainLoop
 				
-USER_TIME_LOOP:
-				LDA IIC_FLAG
-				CMP #0
-				BEQ USER_TIME_LOOP
-				CLR IIC_FLAG 
+reset_position:
+				CLR current_time_position
+				BRA mainLoop
+
+convertHexToChars:
 				CLRH
-				LDX CURRENT_POSITION
+				LDX #10
+				DIV
+				STHX $128 ; move high register to low register
+				LDX $128 ;probably a better way to do this...
 				
-				CPX #$0
-				BEQ SET_0
-				CPX #$1
-				BEQ SET_1
-				CPX #$2
-				BEQ SET_2
-				CPX #$3
-				BEQ SET_3
-				CPX #$4
-				BEQ SET_4
-				CPX #$5
-				BEQ SET_5
-				CPX #$6
-				BEQ SET_6
-				CPX #$7
-				BEQ SET_7
-				CPX #$8
-				BEQ SET_8
-				CPX #$9
-				BEQ SET_9
-				CPX #$A
-				BEQ SET_A
-				CPX #$B
-				BEQ SET_B
+				STA tens_char ; store values for now
+				STX ones_char 
+				CLRH
+				
+				LDA chars,X ;actually convert to the char
+				STA ones_char
+				
+				LDX tens_char
+				
+				LDA chars,X
+				STA tens_char
 				
 				RTS
 				
-SET_0:				
-	LDA #$88
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA HOUR
-	BRA USER_TIME_LOOP
-	
-SET_1:
-	LDA #$89
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	LDA HOUR
-	ADD X
-	BRA USER_TIME_LOOP
-	
-SET_2:
-	LDA #$8A
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA MINUTE
-	BRA USER_TIME_LOOP
-	
-SET_3:
-	LDA #$8B
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA MINUTE
-	ADD X
-	STA MINUTE
-	BRA USER_TIME_LOOP
-	
-SET_4:
-	LDA #$8D
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA SECOND
-	BRA USER_TIME_LOOP
-	
-SET_5:
-	LDA #$8E
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA SECOND
-	ADD X
-	STA SECOND
-	BRA USER_TIME_LOOP
-	
-SET_6:
-	LDA #$C8
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA MONTH
-	BRA USER_TIME_LOOP
-	
-SET_7:
-	LDA #$C9
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA MONTH
-	ADD X
-	STA MONTH
-	BRA USER_TIME_LOOP	
-SET_8:
-	LDA #$CA
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA DAY
-	BRA USER_TIME_LOOP
-	
-SET_9:
-	LDA #$CB
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA DAY
-	ADD X
-	STA DAY
-	BRA USER_TIME_LOOP
-	
-SET_A:
-	LDA #$CD
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA #$A
-	MUL
-	STA YEAR
-	BRA USER_TIME_LOOP
-	
-SET_B:
-	LDA #$CE
-	JSR LCD_ADDR
-	LDX IIC_msg
-	LDA chars,X
-	JSR LCD_WRITE
-	LDA YEAR
-	ADD X
-	STA YEAR
-	BRA USER_TIME_LOOP
+loadTime:
+				LDA IIC_msg
+				
 				
 LCD_Write_Time_Screen:
+				CLR write_position
+				CLR time_write_position
 				LDA #$80
 				JSR LCD_ADDR
 				CLRH
 				CLRX
+				BRA LINE1
+				Write_Time:
+					LDX time_write_position
+					LDA time_chars,X
+					JSR LCD_WRITE
+					INCX
+					STX time_write_position
+					INC write_position ; increment cursor
+					
 				LINE1:
+					LDA write_position
+					LDX time_write_position
+					CMP replacement,X
+					BEQ Write_Time
+					CMP #$10
+					BEQ Next_Line ; go to next line
+					LDX write_position
 					LDA time,X
 					JSR LCD_WRITE
 					INCX
+					STX write_position
 					CPX #$10
 					BNE LINE1
-				LDA #$C0
-				JSR LCD_ADDR
-				CLRH
-				CLRX
+				Next_Line:
+					LDA #$C0
+					JSR LCD_ADDR
+					CLRH
+					CLRX
+					CLR write_position
+					BRA LINE2
+				Write_Date:
+					LDX time_write_position
+					LDA time_chars,X
+					JSR LCD_WRITE
+					INCX
+					STX time_write_position
+					INC write_position ; increment cursor
+					
 				LINE2:
+					LDA write_position
+					LDX time_write_position
+					CMP replacement,X
+					BEQ Write_Date
+					CMP #$10
+					BEQ Finish ; go to next line
+					LDX write_position
 					LDA date,X
 					JSR LCD_WRITE
 					INCX
+					STX write_position
 					CPX #$10
 					BNE LINE2
-				RTS
+					
+				Finish:
+					RTS
 					
 				
 				
@@ -414,9 +340,9 @@ _Viic_slave_read:
 				STA IIC_msg, X ;store recieved data in IIC_MSG
 				INCX
 				STX current ; increment current
-				LDA $121
+				LDA IIC_FLAG
 				INCA
-				STA $121
+				STA IIC_FLAG
 				RTI
 				
 ;--------------
