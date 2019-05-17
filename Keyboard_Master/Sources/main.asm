@@ -5,12 +5,21 @@
 			XDEF _Startup, main, _Viic, _vKeyboard
 			XREF __SEG_END_SSTACK	; symbol defined by the linker for the end of the stack
 		
-	ORG $0060 
-	FullKeypad: DS.B 1 ;VARIBLE FOR TESTING 
+	ORG $0060
 	IIC_addr: DS.B 1   ;TRACK IIC ADRESS
 	msgLength: DS.B 1  ; TRACK TOTAL MESSAGE LENGTH
 	current: DS.B 1    ; TRACK WHICH BYTE WE HAVE SENT 
-	IIC_msg: DS.B 1    ; enable 32 bit transmission 
+	IIC_msg: DS.B 2    ; enable 32 bit transmission 
+	
+	keyboard: DS.B 1
+	
+	year: DS.B 1
+	month: DS.B 1
+	day: DS.B 1
+	hour: DS.B 1
+	minute: DS.B 1
+	second: DS.B 1
+	time_placeholder: DS.B 1
 
 ;code section
 	ORG $E000			
@@ -63,12 +72,90 @@ main:
 
 mainLoop:
 
-				LDA #%0
-				STA $170
+				JSR getTime
+				LDA time_placeholder
+				STA hour
 				
+				JSR getTime
+				LDA time_placeholder
+				STA minute
+				
+				JSR getTime
+				LDA time_placeholder
+				STA second
+				
+				JSR getTime
+				LDA time_placeholder
+				STA month
+				
+				JSR getTime
+				LDA time_placeholder
+				STA day
+				
+				JSR getTime
+				LDA time_placeholder
+				STA year
+				
+				BRA mainLoop
+				CLRH
+				CLRX
+				MOV #%11010000, IIC_addr
+				
+				
+				LDA #2   ;set message length to 2 byte
+				STA msgLength
+				LDA #$0
+				CLRX
+				STA IIC_msg,X
+				
+				JSR IIC_DataWrite    ;begin data transfer
+				
+				BRA mainLoop
+				
+getTime:
+
+				JSR keyboardEnable
+				LDA keyboard
+				
+				LDHX #10
+				MUL
+				
+				STA time_placeholder
+				
+				JSR keyboardEnable
+				
+				LDA time_placeholder
+				
+				ADD keyboard
+				
+				STA time_placeholder
+				
+				STA IIC_msg
+				
+				MOV #$10, IIC_addr   ;set slave address
+				
+				LDA #1   ;set message length to 1 byte
+				STA msgLength
+				JSR DELAY
+				JSR IIC_DataWrite    ;begin data transfer
+				
+				MOV #$20, IIC_addr   ;set slave address
+				
+				LDA #1   ;set message length to 1 byte
+				STA msgLength
+				JSR DELAY
+				JSR IIC_DataWrite    ;begin data transfer
+				rts
+				
+
+				
+keyboardEnable:
 				LDA PTBD
 				AND #%11000011
 				STA PTBD
+				
+				LDA #%0 ;clear flag
+				STA $170
 				
 				BSET 2, PTBD
 				JSR KEYBOARD_DELAY
@@ -87,29 +174,12 @@ mainLoop:
 				BCLR 5, PTBD
 				
 				LDA $170
+				CMP #0
+				BEQ keyboardEnable
 				
-				BEQ mainLoop
+				JSR LONG_DELAY
 				
-				MOV #$10, IIC_addr   ;set slave address
-				
-				LDA #1   ;set message length to 1 byte
-				STA msgLength
-				JSR DELAY
-				JSR IIC_DataWrite    ;begin data transfer
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				
-				MOV #$20, IIC_addr   ;set slave address
-				LDA #1   ;set message length to 1 byte
-				STA msgLength
-				JSR DELAY
-				JSR IIC_DataWrite    ;begin data transfer
-				
-				BRA mainLoop	
+				RTS
 				
 _vKeyboard:
 				BSET 2, KBISC ;CLEAR FLAG
@@ -162,82 +232,74 @@ _vKeyboard:
 				BRA Clear_Flag
 				
 Send_0:
-				MOV #%00000000, IIC_msg
+				MOV #%00000000, keyboard
 				BRA Clear_Flag
 				
 Send_1:
-				MOV #%00000001, IIC_msg
+				MOV #%00000001, keyboard
 				BRA Clear_Flag
 				
 Send_2:
-				MOV #%00000010, IIC_msg
+				MOV #%00000010, keyboard
 				BRA Clear_Flag
 				
 Send_3:
-				MOV #%00000011, IIC_msg
+				MOV #%00000011, keyboard
 				BRA Clear_Flag
 				
 Send_4:
-				MOV #%00000100, IIC_msg
+				MOV #%00000100, keyboard
 				BRA Clear_Flag
 				
 Send_5:
-				MOV #%00000101, IIC_msg
+				MOV #%00000101, keyboard
 				BRA Clear_Flag
 				
 Send_6:
-				MOV #%00000110, IIC_msg
+				MOV #%00000110, keyboard
 				BRA Clear_Flag
 				
 Send_7:
-				MOV #%00000111, IIC_msg
+				MOV #%00000111, keyboard
 				BRA Clear_Flag
 				
 Send_8:
-				MOV #%00001000, IIC_msg
+				MOV #%00001000, keyboard
 				BRA Clear_Flag
 				
 Send_9:
-				MOV #%00001001, IIC_msg
+				MOV #%00001001, keyboard
 				BRA Clear_Flag
 				
 Send_A:
-				MOV #%00001010, IIC_msg
+				MOV #%00001010, keyboard
 				BRA Clear_Flag
 				
 Send_B:
-				MOV #%00001011, IIC_msg
+				MOV #%00001011, keyboard
 				BRA Clear_Flag
 				
 Send_C:
-				MOV #%00001100, IIC_msg
+				MOV #%00001100, keyboard
 				BRA Clear_Flag
 				
 Send_D:
-				MOV #%00001101, IIC_msg
+				MOV #%00001101, keyboard
 				BRA Clear_Flag
 				
 Send_E:
-				MOV #%00001110, IIC_msg
+				MOV #%00001110, keyboard
 				BRA Clear_Flag
 				
 Send_F:
-				MOV #%00001111, IIC_msg
+				MOV #%00001111, keyboard
 				BRA Clear_Flag
 				
 Clear_Flag:
 				LDA $170
 				INCA
 				STA $170
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
-				JSR DELAY
+				JSR LONG_DELAY
 				BSET 2, KBISC ;CLEAR FLAG
 				RTI	
 				
@@ -444,3 +506,13 @@ DELAY:
 				BNE loop1
 	RTS
 ;-------------------------------------------------------------------------------------------
+LONG_DELAY:
+		LDA #120
+		STA $122
+		loop:
+			JSR DELAY
+			LDA $122
+			DECA
+			STA $122
+			BNE loop
+		RTS
