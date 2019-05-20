@@ -6,10 +6,10 @@
 			XREF __SEG_END_SSTACK	; symbol defined by the linker for the end of the stack
 		
 	ORG $0060
-	IIC_addr: DS.B 1   ;TRACK IIC ADRESS
+	IIC_addr: DS.B 1   ;TRACK IIC ADDRESS
 	msgLength: DS.B 1  ; TRACK TOTAL MESSAGE LENGTH
 	current: DS.B 1    ; TRACK WHICH BYTE WE HAVE SENT 
-	IIC_msg: DS.B 2    ; enable 32 bit transmission 
+	IIC_msg: DS.B 10    ; enable 32 bit transmission 
 	
 	keyboard: DS.B 1
 	
@@ -20,9 +20,13 @@
 	minute: DS.B 1
 	second: DS.B 1
 	time_placeholder: DS.B 1
+	time_placed_flag: DS.B 1
+	rtc_placeholder: DS.B 1
 
 ;code section
-	ORG $E000			
+	ORG $E000
+keyboard_map DC.B %00101000,%00010001,%00100001,%01000001,%00010010,%00100010,%01000010,%00010100,%00100100,%01000100,%10000001,%10000010,%10000100,%10001000,%00011000,%01001000	
+
 main:
 	_Startup:
 			
@@ -30,16 +34,13 @@ main:
 				CLI     ;ENABLE INTERUPTS 
 	
 				LDA SOPT1 ;DISABLE WATCHDOG
+				;ORA #$80
 				AND #$7F
 				STA SOPT1
-	
 	
 				LDA SOPT2      ;SET PTB PINS TO BE USED FOR SDA/SCL
 				ORA #%00000010
 				STA SOPT2
-				
-				MOV #$10, IIC_addr   ;set slave address 
-				MOV #$C1, IIC_msg   ;set actual message
 	
 				JSR IIC_Startup_Master
 				
@@ -69,6 +70,7 @@ main:
 				BSET 1, KBISC
 				BCLR 0, KBISC
 				
+				CLR time_placed_flag
 
 mainLoop:
 
@@ -95,20 +97,10 @@ mainLoop:
 				JSR getTime
 				LDA time_placeholder
 				STA year
+				JSR LONG_DELAY
 				
-				BRA mainLoop
-				CLRH
-				CLRX
-				MOV #%11010000, IIC_addr
-				
-				
-				LDA #2   ;set message length to 2 byte
-				STA msgLength
-				LDA #$0
-				CLRX
-				STA IIC_msg,X
-				
-				JSR IIC_DataWrite    ;begin data transfer
+				INC time_placed_flag ; enable rtc
+				JSR updateRTC
 				
 				BRA mainLoop
 				
@@ -136,7 +128,6 @@ getTime:
 				
 				LDA #1   ;set message length to 1 byte
 				STA msgLength
-				JSR DELAY
 				JSR IIC_DataWrite    ;begin data transfer
 				
 				MOV #$20, IIC_addr   ;set slave address
@@ -145,9 +136,57 @@ getTime:
 				STA msgLength
 				JSR DELAY
 				JSR IIC_DataWrite    ;begin data transfer
+				JSR DELAY
 				rts
 				
-
+writeRTCMessage:
+					CLRH
+					LDX rtc_placeholder
+					STA IIC_msg,X
+					INC rtc_placeholder
+					RTS
+				
+updateRTC:
+				MOV #%11010000, IIC_addr
+				
+				LDA #8   ;set message length to 7 bytes
+				STA msgLength
+				
+				CLR rtc_placeholder
+				
+				LDA #$0 ;write to seconds address
+				JSR writeRTCMessage
+				LDA second
+				JSR writeRTCMessage
+				LDA minute
+				JSR writeRTCMessage
+				LDA hour
+				JSR writeRTCMessage
+				CLRA ;skip day register
+				JSR writeRTCMessage
+				LDA day
+				JSR writeRTCMessage
+				LDA month
+				JSR writeRTCMessage
+				LDA year
+				JSR writeRTCMessage
+				
+				JSR IIC_DataWrite    ;begin data transfer
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				
+				MOV #%11010000, IIC_addr ;reset address pointer
+				LDA #1   ;set message length to 1 bytes
+				STA msgLength
+				CLRA
+				CLRX
+				STA IIC_msg,X
+				JSR IIC_DataWrite
+				
+				RTS
 				
 keyboardEnable:
 				LDA PTBD
@@ -175,13 +214,48 @@ keyboardEnable:
 				
 				LDA $170
 				CMP #0
-				BEQ keyboardEnable
+				BNE keyboardTriggered
 				
+				LDA time_placed_flag
+				CMP #0
+				BEQ keyboardEnable ; if time hasn't been set, wait for that
+				
+				inc time_placed_flag
+				JSR updateFromRTC
+				BRA keyboardEnable
+				
+keyboardTriggered:
 				JSR LONG_DELAY
+				rts
 				
+finished:
+				RTS
+				
+updateFromRTC:
+				LDA time_placed_flag
+				CMP #100
+				BLE finished ; only update from rtc every 100 cycles
+
+				CLR time_placed_flag
+				INC time_placed_flag ; stay inside timeset state
+				
+				LDA #$6 ; we want 6 bytes of data back
+				STA msgLength
+				
+				MOV #%11010001, IIC_addr
+				JSR IIC_DataWrite
+				
+				JSR KEYBOARD_DELAY ;;todo remove the delays once not in debug
+				CLRX
+				INCX
+				LDA IIC_msg,X
+				CMP second
+				BEQ finished
+				STA second
 				RTS
 				
 _vKeyboard:
+				CLR keyboard
 				BSET 2, KBISC ;CLEAR FLAG
 				BSET 2, KBISC ;CLEAR FLAG
 				LDA PTAD
@@ -196,103 +270,20 @@ _vKeyboard:
 				LSRA
 				LSRA
 				ORA $172
+				STA $172
+				CLRH
+				CLRX
+				use_keyboard_map:
+					CPX #$10
+					BEQ Clear_Flag
+					LDA keyboard_map,X
+					INCX
+					CMP $172
+					BNE use_keyboard_map
+				DECX
 				
-				CMP #%00101000
-				BEQ Send_0
-				CMP #%00010001
-				BEQ Send_1
-				CMP #%00100001
-				BEQ Send_2
-				CMP #%01000001
-				BEQ Send_3
-				CMP #%00010010
-				BEQ Send_4
-				CMP #%00100010
-				BEQ Send_5
-				CMP #%01000010
-				BEQ Send_6
-				CMP #%00010100
-				BEQ Send_7
-				CMP #%00100100
-				BEQ Send_8
-				CMP #%01000100
-				BEQ Send_9
-				CMP #%10000001
-				BEQ Send_A
-				CMP #%10000010
-				BEQ Send_B
-				CMP #%10000100
-				BEQ Send_C
-				CMP #%10001000
-				BEQ Send_D
-				CMP #%00011000
-				BEQ Send_E
-				CMP #%01001000
-				BEQ Send_F
-				BRA Clear_Flag
+				STX keyboard	
 				
-Send_0:
-				MOV #%00000000, keyboard
-				BRA Clear_Flag
-				
-Send_1:
-				MOV #%00000001, keyboard
-				BRA Clear_Flag
-				
-Send_2:
-				MOV #%00000010, keyboard
-				BRA Clear_Flag
-				
-Send_3:
-				MOV #%00000011, keyboard
-				BRA Clear_Flag
-				
-Send_4:
-				MOV #%00000100, keyboard
-				BRA Clear_Flag
-				
-Send_5:
-				MOV #%00000101, keyboard
-				BRA Clear_Flag
-				
-Send_6:
-				MOV #%00000110, keyboard
-				BRA Clear_Flag
-				
-Send_7:
-				MOV #%00000111, keyboard
-				BRA Clear_Flag
-				
-Send_8:
-				MOV #%00001000, keyboard
-				BRA Clear_Flag
-				
-Send_9:
-				MOV #%00001001, keyboard
-				BRA Clear_Flag
-				
-Send_A:
-				MOV #%00001010, keyboard
-				BRA Clear_Flag
-				
-Send_B:
-				MOV #%00001011, keyboard
-				BRA Clear_Flag
-				
-Send_C:
-				MOV #%00001100, keyboard
-				BRA Clear_Flag
-				
-Send_D:
-				MOV #%00001101, keyboard
-				BRA Clear_Flag
-				
-Send_E:
-				MOV #%00001110, keyboard
-				BRA Clear_Flag
-				
-Send_F:
-				MOV #%00001111, keyboard
 				BRA Clear_Flag
 				
 Clear_Flag:
@@ -387,7 +378,9 @@ _Viic_master_EoAC:
 		AND #%00000001
 		BNE _Viic_master_toRxMode
 		
-		LDA IIC_msg
+		CLRH
+		LDX current
+		LDA IIC_msg,X
 		STA IICD
 		
 		LDA current 
@@ -504,15 +497,19 @@ DELAY:
 				DECA
 				STA $120
 				BNE loop1
-	RTS
+		RTS
 ;-------------------------------------------------------------------------------------------
 LONG_DELAY:
-		LDA #120
+		LDA #1;0
 		STA $122
-		loop:
+		long_loop:
 			JSR DELAY
 			LDA $122
 			DECA
 			STA $122
-			BNE loop
-		RTS
+			CMP #0
+			BNE long_loop
+			RTS
+			
+RTS
+
