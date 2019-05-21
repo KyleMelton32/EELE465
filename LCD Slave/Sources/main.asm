@@ -9,7 +9,7 @@
 	
 ;----I2C-VARIBLES-----------------------------
 	IIC_addr: DS.B 1
-	IIC_msg: DS.B 1    ; enable 32 bit transmission
+	IIC_msg: DS.B 6    ; enable 32 bit transmission
 	msgLength: DS.B 1
 	current: DS.B 1
 	
@@ -20,6 +20,7 @@
 	tens_char: DS.B 1
 	ones_char: DS.B 1
 	
+	time_array: DS.B 6 ;second, minute, hour, day, month, year
 	
 	TIME_FLAG: DS.B 1
 	IIC_FLAG: DS.B 1
@@ -35,8 +36,9 @@ RS			EQU		1	;PORTA BIT 1
 
 chars DC.B '0123456789ABCDEF'
 base DC.B 'Time is hh:mm:ssDate is mm/dd/yy'
-replacement DC.B $8, $9, $B, $C, $E, $F, $18, $19, $1B, $1C, $1E, $1F
-			
+replacement DC.B $E, $F, $B, $C, $8, $9, $1B, $1C, $18, $19, $1E, $1F
+default_time_array DC.B $FF, $FF, $FF, $FF, $FF, $FF
+		
 main:
 	_Startup:
 			  	LDHX #__SEG_END_SSTACK  ;INITIALZE THE STACK POINTER
@@ -67,6 +69,48 @@ main:
 				CLR		PTAD
 				CLR		PTBD
 				
+				JSR resetTimeDate
+					
+				CLRH ;shift default_time_array into time_array
+				CLRX
+				loadTimeRAM:
+					LDA default_time_array,X
+					STA time_array,X
+					INCX
+					CPX #$6
+					BNE loadTimeRAM 
+					
+				
+				LDA #0
+				STA IIC_FLAG
+				STA current_time_position
+				STA TIME_FLAG
+				STA time_write_position
+				
+				
+				JSR LCD_Startup
+				JSR LCD_Write_Time_Screen
+;---------------------------------------------------------------------------
+mainLoop:
+				LDA IIC_FLAG
+				ADD #$0
+				CMP #6 ; if this doesn't work, use current instead?
+				BNE mainLoop ; no i2c change
+				CLR IIC_FLAG
+				JSR resetTimeDate
+				CLRX
+				CLRH
+				readIIC_msg:
+					LDA IIC_msg,X
+					STA time_array,X
+					INCX
+					CPX #6
+					BNE readIIC_msg
+				CLR current_time_position
+				JSR writeTimeArray
+				BRA mainLoop
+				
+resetTimeDate:
 				CLRH ;shift the base screen into ram to be modified
 				CLRX ;for some reason, this is required if not in debug mode
 				;when base message is stored in RAM and not in debug, it prints garbage
@@ -77,57 +121,45 @@ main:
 					INCX
 					CPX #$20
 					BNE loadRAM 
+				RTS
+				
+writeTimeArray:			
+				LDX time_write_position
+				LDA time_array,X
+				JSR convertDecimalAsHexToChars ; move A into tens and ones
+				char1:
+					LDX current_time_position
+					INC current_time_position
+					LDX replacement,X
+					LDA tens_char
+					CMP #$46 ; char is F and is a flag for don't actually write
+					BEQ char2 ;so lets skip to the next char
+					STA timedate,X ;tens should be written now
+				char2:
+					LDX current_time_position
+					INC current_time_position
+					LDX replacement,X
+					LDA ones_char
+					CMP #$46 ; char is F and is a flag for don't actually write
+					BEQ write ; so lets just write the default
+					STA timedate,X
+				write:
+					INC time_write_position
+					LDA time_write_position
 					
-				
-				LDA #0
-				STA IIC_FLAG
-				STA current_time_position
-				STA TIME_FLAG
-				
-				JSR LCD_Startup
-				JSR LCD_Write_Time_Screen
-;---------------------------------------------------------------------------
-mainLoop:
-				LDA IIC_FLAG
-				ADD #$0
-				CMP #0
-				BEQ mainLoop ; no i2c change
-				INC TIME_FLAG
-				CLR IIC_FLAG
-				
-				LDA IIC_msg
-				JSR convertDecimalAsHexToChars
-				LDX current_time_position
-				LDX replacement,X
-				LDA tens_char
-				STA timedate,X
-				INC current_time_position
-				LDX current_time_position
-				LDX replacement,X
-				LDA ones_char
-				STA timedate,X
-				INC current_time_position
-				JSR LCD_Write_Time_Screen
-				
-				;write directly to time/date
-				
-				
-				LDA current_time_position
-				CMP #$C
-				BEQ reset_position
-				
-				BRA mainLoop
-				
-reset_position:
-				CLR current_time_position
-				BRA mainLoop
+					CMP #6
+					BNE writeTimeArray
+					CLR current_time_position ; we have finished, let's write to the LCD and reset
+					CLR time_write_position
+					JSR LCD_Write_Time_Screen
+					RTS
 
 convertDecimalAsHexToChars:
 				
 				STA tens_char ; store values for now
 				STA ones_char 
 				CLRH
-				AND #%1111000
+				AND #%11110000
 				LSRA
 				LSRA
 				LSRA
