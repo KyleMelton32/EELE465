@@ -91,12 +91,12 @@ mainLoop:
 				LDA IIC_FLAG
 				ADD #$0
 				CMP #0
-				BEQ mainLoop
+				BEQ mainLoop ; no i2c change
 				INC TIME_FLAG
 				CLR IIC_FLAG
 				
 				LDA IIC_msg
-				JSR convertHexToChars
+				JSR convertDecimalAsHexToChars
 				LDX current_time_position
 				LDX replacement,X
 				LDA tens_char
@@ -122,24 +122,27 @@ reset_position:
 				CLR current_time_position
 				BRA mainLoop
 
-convertHexToChars:
-				CLRH
-				LDX #10
-				DIV
-				STHX $128 ; move high register to low register
-				LDX $128 ;probably a better way to do this...
+convertDecimalAsHexToChars:
 				
 				STA tens_char ; store values for now
-				STX ones_char 
+				STA ones_char 
 				CLRH
+				AND #%1111000
+				LSRA
+				LSRA
+				LSRA
+				LSRA
+				TAX ; store A in X
 				
 				LDA chars,X ;actually convert to the char
-				STA ones_char
+				STA tens_char
 				
-				LDX tens_char
+				LDA ones_char
+				AND #%00001111
+				TAX ; store A in X
 				
 				LDA chars,X
-				STA tens_char
+				STA ones_char
 				
 				RTS
 				
