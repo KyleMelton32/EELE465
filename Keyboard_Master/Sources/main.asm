@@ -14,13 +14,6 @@
 	keyboard: DS.B 1
 	keyboard_placeholder: DS.B 1
 	
-	year: DS.B 1
-	month: DS.B 1
-	day: DS.B 1
-	hour: DS.B 1
-	minute: DS.B 1
-	second: DS.B 1
-	
 	time_array: DS.B 6 ;second, minute, hour, day, month, year
 	time_placeholder: DS.B 1
 	time_placed_flag: DS.B 1
@@ -41,7 +34,6 @@ main:
 				CLI     ;ENABLE INTERUPTS 
 	
 				LDA SOPT1 ;DISABLE WATCHDOG
-				;ORA #$80
 				AND #$7F
 				STA SOPT1
 	
@@ -97,36 +89,42 @@ mainLoop:
 				CLRH
 				LDX #$2
 				STA time_array,X
-				
+				JSR sendTime
+
 				JSR getTime
 				LDA time_placeholder
 				CLRH
 				LDX #$1
 				STA time_array,X
+				JSR sendTime
 				
 				JSR getTime
 				LDA time_placeholder
 				CLRH
 				LDX #$0
 				STA time_array,X
+				JSR sendTime
 				
 				JSR getTime
 				LDA time_placeholder
 				CLRH
 				LDX #$4
 				STA time_array,X
+				JSR sendTime
 				
 				JSR getTime
 				LDA time_placeholder
 				CLRH
 				LDX #$3
 				STA time_array,X
+				JSR sendTime
 				
 				JSR getTime
 				LDA time_placeholder
 				CLRH
 				LDX #$5
 				STA time_array,X
+				JSR sendTime
 				JSR LONG_DELAY
 				
 				INC time_placed_flag ; enable rtc
@@ -159,7 +157,7 @@ getTime:
 				
 				LDA #1   ;set message length to 1 byte
 				STA msgLength
-				JSR IIC_DataWrite    ;begin data transfer
+				;JSR IIC_DataWrite    ;begin data transfer
 				rts
 					
 setTimeToRTC:
@@ -200,6 +198,26 @@ setTimeToRTC:
 				
 				JSR resetRTCAddress ; get ready to read
 				
+				RTS
+				
+sendTime:		
+				LDA #6   ;set message length to 6 bytes
+				STA msgLength
+				
+				CLRX
+				CLRH
+				transfer:
+					LDA time_array,X
+					STA IIC_msg,X
+					INCX
+					CPX msgLength
+					BNE transfer
+				MOV #$20, IIC_addr   ;set slave address
+				
+				LDA #6   ;set message length to 6 bytes
+				STA msgLength
+				
+				JSR IIC_DataWrite    ;begin data transfer
 				RTS
 				
 keyboardEnable:
@@ -257,6 +275,36 @@ resetRTCAddress:
 				
 				RTS
 				
+saveRTCData:
+				CLR time_placed_flag2
+				CLRX
+				CLRH
+				LDA IIC_msg,X
+				STA time_array,X
+				INCX
+				LDA IIC_msg,X
+				STA time_array,X
+				INCX
+				LDA IIC_msg,X
+				STA time_array,X
+				INCX
+				INCX
+				LDA IIC_msg,X
+				DECX
+				STA time_array,X
+				INCX
+				INCX
+				LDA IIC_msg,X
+				DECX
+				STA time_array,X
+				INCX
+				INCX
+				LDA IIC_msg,X
+				DECX
+				STA time_array,X
+				JSR sendTime
+				RTS
+				
 updateFromRTC:
 				LDA time_placed_flag
 				CMP #255
@@ -267,30 +315,17 @@ updateFromRTC:
 				
 				INC time_placed_flag2
 				LDA time_placed_flag2
-				CMP #80
+				CMP #40
 				BEQ resetRTCAddress ; reset the address for the upcoming read
-				CMP #120
+				CMP #65
+				BEQ saveRTCData
+				CMP #60
 				BNE finished
-				CLR time_placed_flag2
 				
-				LDA #$0F ; we want 16 bytes of data back
+				LDA #$08 ; we want 8 bytes of data back
 				STA msgLength
 				MOV #%11010001, IIC_addr
 				JSR IIC_DataWrite
-				
-				JSR LONG_DELAY ;;todo remove the delays once not in debug
-				CLRX
-				CLRH
-				LDA IIC_msg,X
-				CMP second
-				BEQ finished
-				STA second
-				
-				MOV #$20, IIC_addr   ;set slave address
-				
-				LDA #1   ;set message length to 1 byte
-				STA msgLength
-				JSR IIC_DataWrite    ;begin data transfer
 				RTS
 				
 _vKeyboard:
@@ -458,6 +493,7 @@ _Viic_master_rxStop:
 		;12
 
 		BCLR IICC_MST, IICC                          ;SEND STOP BIT
+		BCLR IICC_TXAK, IICC
 		BRA _Viic_master_readData
 
 ;------------------------------------------------------------------------------------------

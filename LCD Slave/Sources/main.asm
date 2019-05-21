@@ -365,7 +365,7 @@ DELAYLOOP:
 				LDA #1 ;load highest decimal value into accumulator for outer loop
 	            STA $125
 LOOP0:
-				LDA #100
+				LDA #50
 				STA $126
 LOOP1:
 				LDA #255
