@@ -9,7 +9,7 @@
 	IIC_addr: DS.B 1   ;TRACK IIC ADDRESS
 	msgLength: DS.B 1  ; TRACK TOTAL MESSAGE LENGTH
 	current: DS.B 1    ; TRACK WHICH BYTE WE HAVE SENT 
-	IIC_msg: DS.B 10    ; enable 32 bit transmission 
+	IIC_msg: DS.B 16    ; enable 32 bit transmission 
 	
 	keyboard: DS.B 1
 	keyboard_placeholder: DS.B 1
@@ -115,8 +115,10 @@ getTime:
 				JSR keyboardEnable
 				LDA keyboard
 				
-				LDHX #10
-				MUL
+				LSLA
+				LSLA
+				LSLA
+				LSLA
 				
 				STA time_placeholder
 				
@@ -124,7 +126,7 @@ getTime:
 				
 				LDA time_placeholder
 				
-				ADD keyboard
+				ORA keyboard
 				
 				STA time_placeholder
 				
@@ -184,13 +186,7 @@ updateRTC:
 				JSR DELAY
 				JSR DELAY
 				
-				MOV #%11010000, IIC_addr ;reset address pointer
-				LDA #1   ;set message length to 1 bytes
-				STA msgLength
-				CLRA
-				CLRX
-				STA IIC_msg,X
-				JSR IIC_DataWrite
+				JSR resetRTCAddress
 				
 				RTS
 				
@@ -238,32 +234,51 @@ keyboardTriggered:
 finished:
 				RTS
 				
+resetRTCAddress:
+				MOV #%11010000, IIC_addr ;reset address pointer
+				LDA #1   ;set message length to 1 bytes
+				STA msgLength
+				CLRA
+				CLRX
+				STA IIC_msg,X
+				JSR IIC_DataWrite
+				
+				RTS
+				
 updateFromRTC:
 				LDA time_placed_flag
 				CMP #255
-				BNE finished ; only update from rtc every 100 cycles
+				BNE finished ; only update from rtc every 255 * 255 cycles
 
 				CLR time_placed_flag
 				INC time_placed_flag ; stay inside timeset state
 				
 				INC time_placed_flag2
 				LDA time_placed_flag2
-				CMP #255
+				CMP #80
+				BEQ resetRTCAddress ; reset the address for the upcoming read
+				CMP #120
 				BNE finished
 				CLR time_placed_flag2
 				
-				LDA #$8 ; we want 8 bytes of data back
+				LDA #$0F ; we want 16 bytes of data back
 				STA msgLength
 				MOV #%11010001, IIC_addr
 				JSR IIC_DataWrite
 				
-				JSR KEYBOARD_DELAY ;;todo remove the delays once not in debug
+				JSR LONG_DELAY ;;todo remove the delays once not in debug
 				CLRX
-				INCX
+				CLRH
 				LDA IIC_msg,X
 				CMP second
 				BEQ finished
 				STA second
+				
+				MOV #$20, IIC_addr   ;set slave address
+				
+				LDA #1   ;set message length to 1 byte
+				STA msgLength
+				JSR IIC_DataWrite    ;begin data transfer
 				RTS
 				
 _vKeyboard:
