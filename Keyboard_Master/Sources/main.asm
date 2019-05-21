@@ -12,6 +12,7 @@
 	IIC_msg: DS.B 10    ; enable 32 bit transmission 
 	
 	keyboard: DS.B 1
+	keyboard_placeholder: DS.B 1
 	
 	year: DS.B 1
 	month: DS.B 1
@@ -21,6 +22,8 @@
 	second: DS.B 1
 	time_placeholder: DS.B 1
 	time_placed_flag: DS.B 1
+	time_placed_flag2: DS.B 1
+	time_placed_flag3: DS.B 1
 	rtc_placeholder: DS.B 1
 
 ;code section
@@ -31,6 +34,7 @@ main:
 	_Startup:
 			
 				LDHX #__SEG_END_SSTACK  ;INITIALZE THE STACK POINTER
+				TXS
 				CLI     ;ENABLE INTERUPTS 
 	
 				LDA SOPT1 ;DISABLE WATCHDOG
@@ -71,6 +75,8 @@ main:
 				BCLR 0, KBISC
 				
 				CLR time_placed_flag
+				CLR time_placed_flag2
+				CLR time_placed_flag3
 
 mainLoop:
 
@@ -194,7 +200,7 @@ keyboardEnable:
 				STA PTBD
 				
 				LDA #%0 ;clear flag
-				STA $170
+				STA keyboard_placeholder
 				
 				BSET 2, PTBD
 				JSR KEYBOARD_DELAY
@@ -212,7 +218,7 @@ keyboardEnable:
 				JSR KEYBOARD_DELAY
 				BCLR 5, PTBD
 				
-				LDA $170
+				LDA keyboard_placeholder
 				CMP #0
 				BNE keyboardTriggered
 				
@@ -226,6 +232,7 @@ keyboardEnable:
 				
 keyboardTriggered:
 				JSR LONG_DELAY
+				JSR LONG_DELAY
 				rts
 				
 finished:
@@ -233,15 +240,20 @@ finished:
 				
 updateFromRTC:
 				LDA time_placed_flag
-				CMP #100
-				BLE finished ; only update from rtc every 100 cycles
+				CMP #255
+				BNE finished ; only update from rtc every 100 cycles
 
 				CLR time_placed_flag
 				INC time_placed_flag ; stay inside timeset state
 				
-				LDA #$6 ; we want 6 bytes of data back
-				STA msgLength
+				INC time_placed_flag2
+				LDA time_placed_flag2
+				CMP #255
+				BNE finished
+				CLR time_placed_flag2
 				
+				LDA #$8 ; we want 8 bytes of data back
+				STA msgLength
 				MOV #%11010001, IIC_addr
 				JSR IIC_DataWrite
 				
@@ -287,9 +299,9 @@ _vKeyboard:
 				BRA Clear_Flag
 				
 Clear_Flag:
-				LDA $170
+				LDA keyboard_placeholder
 				INCA
-				STA $170
+				STA keyboard_placeholder
 				JSR LONG_DELAY
 				BSET 2, KBISC ;CLEAR FLAG
 				RTI	
@@ -327,7 +339,6 @@ _Viic_master:
 		
 
 ;-------------------------------------------------------------------------------------------
-;check if transmitting or reciving 
 _Viic_master_TX:
 		
 		
@@ -409,7 +420,7 @@ _Viic_master_RX:
 		BEQ _Viic_master_rxStop
 		
 		;2nd to last byte to be read?
-		INCA
+		DECA ;this was originally a INCA in the provided code. Without this DECA, the NACK is never sent at the end of the rx.
 		BEQ _Viic_master_txACK
 		
 		BRA _Viic_master_readData
@@ -425,9 +436,6 @@ _Viic_master_rxStop:
 ;------------------------------------------------------------------------------------------
 ;generate acknowlege signal 
 _Viic_master_txACK:
-
-		;4 
-
 		BSET IICC_TXAK, IICC             ;TRANSER ACKNOWLEGE
 		BRA _Viic_master_readData
 		
@@ -500,7 +508,7 @@ DELAY:
 		RTS
 ;-------------------------------------------------------------------------------------------
 LONG_DELAY:
-		LDA #1;0
+		LDA #120
 		STA $122
 		long_loop:
 			JSR DELAY
