@@ -20,6 +20,8 @@
 	hour: DS.B 1
 	minute: DS.B 1
 	second: DS.B 1
+	
+	time_array: DS.B 6 ;second, minute, hour, day, month, year
 	time_placeholder: DS.B 1
 	time_placed_flag: DS.B 1
 	time_placed_flag2: DS.B 1
@@ -29,6 +31,7 @@
 ;code section
 	ORG $E000
 keyboard_map DC.B %00101000,%00010001,%00100001,%01000001,%00010010,%00100010,%01000010,%00010100,%00100100,%01000100,%10000001,%10000010,%10000100,%10001000,%00011000,%01001000	
+default_time_array DC.B $FF, $FF, $FF, $FF, $FF, $FF
 
 main:
 	_Startup:
@@ -74,6 +77,15 @@ main:
 				BSET 1, KBISC
 				BCLR 0, KBISC
 				
+				CLRH ;shift default_time_array into time_array
+				CLRX
+				loadRAM:
+					LDA default_time_array,X
+					STA time_array,X
+					INCX
+					CPX #$6
+					BNE loadRAM 
+				
 				CLR time_placed_flag
 				CLR time_placed_flag2
 				CLR time_placed_flag3
@@ -82,36 +94,47 @@ mainLoop:
 
 				JSR getTime
 				LDA time_placeholder
-				STA hour
+				CLRH
+				LDX #$2
+				STA time_array,X
 				
 				JSR getTime
 				LDA time_placeholder
-				STA minute
+				CLRH
+				LDX #$1
+				STA time_array,X
 				
 				JSR getTime
 				LDA time_placeholder
-				STA second
+				CLRH
+				LDX #$0
+				STA time_array,X
 				
 				JSR getTime
 				LDA time_placeholder
-				STA month
+				CLRH
+				LDX #$4
+				STA time_array,X
 				
 				JSR getTime
 				LDA time_placeholder
-				STA day
+				CLRH
+				LDX #$3
+				STA time_array,X
 				
 				JSR getTime
 				LDA time_placeholder
-				STA year
+				CLRH
+				LDX #$5
+				STA time_array,X
 				JSR LONG_DELAY
 				
 				INC time_placed_flag ; enable rtc
-				JSR updateRTC
+				JSR setTimeToRTC
 				
 				BRA mainLoop
 				
 getTime:
-
 				JSR keyboardEnable
 				LDA keyboard
 				
@@ -137,48 +160,37 @@ getTime:
 				LDA #1   ;set message length to 1 byte
 				STA msgLength
 				JSR IIC_DataWrite    ;begin data transfer
-				
-				MOV #$20, IIC_addr   ;set slave address
-				
-				LDA #1   ;set message length to 1 byte
-				STA msgLength
-				JSR DELAY
-				JSR IIC_DataWrite    ;begin data transfer
-				JSR DELAY
 				rts
-				
-writeRTCMessage:
-					CLRH
-					LDX rtc_placeholder
-					STA IIC_msg,X
-					INC rtc_placeholder
-					RTS
-				
-updateRTC:
+					
+setTimeToRTC:
 				MOV #%11010000, IIC_addr
 				
 				LDA #8   ;set message length to 7 bytes
 				STA msgLength
-				
-				CLR rtc_placeholder
-				
-				LDA #$0 ;write to seconds address
-				JSR writeRTCMessage
-				LDA second
-				JSR writeRTCMessage
-				LDA minute
-				JSR writeRTCMessage
-				LDA hour
-				JSR writeRTCMessage
-				CLRA ;skip day register
-				JSR writeRTCMessage
-				LDA day
-				JSR writeRTCMessage
-				LDA month
-				JSR writeRTCMessage
-				LDA year
-				JSR writeRTCMessage
-				
+				CLRH
+				CLRX
+				LDA #$0
+				STA IIC_msg,X
+				write_loop:
+					LDA time_array,X
+					INCX
+					STA IIC_msg,X
+					CPX #$03
+					BEQ write_date ; deal with this seperately because skipping a register
+					BRA write_loop
+				write_date: ; IIC_msg: 0x00, second, minute, hour
+					INCX
+					CLRA
+					STA IIC_msg,X ;IIC_msg: 0x00, second, minute, hour, 0x00
+				write_day_month_year:
+					DECX
+					LDA time_array,X
+					INCX
+					INCX
+					STA IIC_msg,X
+					CPX #$7
+					BNE write_day_month_year
+				; IIC_msg: 0x00, second, minute, hour, 0x00, day, month, year
 				JSR IIC_DataWrite    ;begin data transfer
 				JSR DELAY
 				JSR DELAY
@@ -186,7 +198,7 @@ updateRTC:
 				JSR DELAY
 				JSR DELAY
 				
-				JSR resetRTCAddress
+				JSR resetRTCAddress ; get ready to read
 				
 				RTS
 				
