@@ -20,13 +20,17 @@
 	counter1: DS.B 1
 	
 	state: DS.B 1
-	t92: DS.B 1
+	t92: DS.B 2
 	seconds: DS.B 1
+	
+	temp_array: DS.B 2
+	bitshift_placeholder: DS.B 1
 
 ;code section
 	ORG $E000
 keyboard_map DC.B %00101000,%00010001,%00100001,%01000001,%00010010,%00100010,%01000010,%00010100,%00100100,%01000100,%10000001,%10000010,%10000100,%10001000,%00011000,%01001000	
 default_time_array DC.B $FF, $FF, $FF, $FF, $FF, $FF
+chars DC.B '0123456789ABCDEF'
 
 main:
 	_Startup:
@@ -124,7 +128,7 @@ mainLoop:
 					JSR readFromRTC
 					BRA mainLoop
 				on35:
-					;JSR getTemperature
+					JSR getTemperature
 					CLR counter1
 					BRA mainLoop
 				
@@ -214,15 +218,18 @@ setCoolState:
 				RTS
 				
 sendToLCD:		
-				LDA #3   ;set message length to 6 bytes
+				LDA #4   ;set message length to 6 bytes
 				STA msgLength
 				
 				CLRX
 				CLRH
 				LDA state
 				STA IIC_msg,X
+				LDA t92,X
 				INCX
-				LDA t92
+				STA IIC_msg,X
+				LDA t92,X
+				INCX
 				STA IIC_msg,X
 				INCX
 				LDA seconds
@@ -234,23 +241,112 @@ sendToLCD:
 
 ;-------------------------------------------------------------
 getTemperature:
-				MOV #%1001001, IIC_addr
-				LDA #2
+				MOV #%10010001, IIC_addr
+				LDA #1
 				STA msgLength
 				JSR IIC_DataWrite
 				JSR DELAY
 				JSR DELAY
-				JSR DELAY
-				JSR DELAY
 				CLRX
 				CLRH
-				LDA IIC_msg,X
-				STA t92,X
+				LDHX IIC_msg
+				STHX temp_array
+				CLRX
+				CLRH
 				INCX
-				LDA IIC_msg,X
+				LDA temp_array,X
+				AND #%11111000 ; clear the bits
+				LSRA
+				LSRA
+				LSRA ;lower bits shifted right 3
+				STA temp_array,X
+				CLRX ; move the 3 lsb from the upper register to the lower register
+				LDA temp_array,X
+				AND #%00000111
+				LSLA
+				LSLA
+				LSLA
+				LSLA
+				LSLA
+				STA bitshift_placeholder
+				INCX
+				LDA temp_array,X
+				ORA bitshift_placeholder
+				STA temp_array,X ;lsb from upper bits now moved to msb of lower
+				CLRX
+				LDA temp_array,X
+				AND #%11111000 ; clear the bits
+				LSRA
+				LSRA
+				LSRA
+				STA temp_array,X ; the registers should now contain the actual twos complement temperature
+				BRSET 4, temp_array, twosComplement
+				
+				JSR doMultiply
+				CLRH
+				LDX #10
+				DIV ;tens in A
+				STHX temp_array ; remainder in temp_array,0
+				CLRH
+				TAX
+				LDA chars,X
+				CLRX
 				STA t92,X
+				
+				LDX temp_array
+				LDA chars,X
+				CLRX
+				INCX
+				STA t92,X
+				
+				RTS
+
+; multiply temp_array by 0.0625
+multiplyUpperBits:
+				CLRX
+				CLRH
+				STHX t92 ; clear t92
+				LDA temp_array,X ; upper bits
+				LDX #62
+				MUL ; X * A = X:A
+				LDX #255
+				MUL ; X * A = X:A
+				STX t92
+				LDHX t92
+				LDX #100
+				DIV ; H:A / X = A
+				CLRH
+				LDX #10
+				DIV
+				INCA
+				CLRX
+				CLRH
+				STA temp_array,X ; store multiplied amount back into temp_array
+				RTS
+
+multiplyLowerBits:
+				INCX ; lower bits
+				LDA temp_array,X
+				LDX #62
+				MUL ; X * A = X:A
+				CLRH
+				STX t92
+				LDHX t92
+				LDX #100
+				DIV
+				CLRH
+				LDX #10
+				DIV
 				RTS
 				
+doMultiply:
+				JSR multiplyUpperBits
+				JSR multiplyLowerBits
+				ADD temp_array; temperature is now in A
+				RTS
+				
+twosComplement:
+				RTS
 ;-------------------------------------------------------------
 			
 ;write time_array to rtc and then jsr resetRTC			

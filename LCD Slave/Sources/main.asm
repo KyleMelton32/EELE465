@@ -23,7 +23,7 @@
 	
 	
 	state: DS.B 1
-	t92: DS.B 1
+	t92: DS.B 2
 	seconds: DS.B 1
 	
 	state_char: DS.B 6
@@ -98,7 +98,7 @@ main:
 mainLoop:
 				LDA IIC_FLAG
 				ADD #$0
-				CMP #2 ; if this doesn't work, use current instead?
+				CMP #3 ; if this doesn't work, use current instead?
 				BLS mainLoop ; no i2c change
 				CLR IIC_FLAG
 				JSR DELAYLOOP
@@ -111,7 +111,14 @@ mainLoop:
 				STA state
 				INCX
 				LDA IIC_msg,X
-				STA t92
+				DECX
+				STA t92,X
+				INCX
+				INCX
+				LDA IIC_msg,X
+				DECX
+				STA t92,X
+				INCX
 				INCX
 				LDA IIC_msg,X
 				STA seconds
@@ -207,14 +214,16 @@ makeCharArrays:
 						LDA off,X
 						BRA setState
 				t92_loop:
-					LDA #$20
-					STA t92_char,X
-					INCX
-					STA t92_char,X
-					INCX
-					STA t92_char,X
 					CLRX
 					CLRH
+					LDA t92,X
+					STA t92_char,X
+					INCX
+					LDA t92,X
+					STA t92_char,X
+					INCX
+					LDA #$20
+					STA t92_char,X
 				
 				seconds_loop:
 					LDA seconds
