@@ -15,11 +15,9 @@
 	keyboard_placeholder: DS.B 1
 	
 	time_array: DS.B 6 ;second, minute, hour, day, month, year
-	time_placeholder: DS.B 1
-	time_placed_flag: DS.B 1
-	time_placed_flag2: DS.B 1
-	time_placed_flag3: DS.B 1
-	rtc_placeholder: DS.B 1
+	update_seconds: DS.B 1 ; when this is zero, don't set the seconds variable, when it's anything else, update the seconds variable
+	counter0: DS.B 1 ; these counters are used in the main loop to only do things every certain number of cycles
+	counter1: DS.B 1
 	
 	state: DS.B 1
 	t92: DS.B 1
@@ -82,35 +80,76 @@ main:
 					CPX #$6
 					BNE loadRAM 
 				
-				CLR time_placed_flag
-				CLR time_placed_flag2
-				CLR time_placed_flag3
+				CLR counter0
+				CLR counter1
 				CLR state
 				CLR seconds
 				CLR t92
-				JSR setOffState
+				JSR setOffState ; put everything in a known state, off just to be safe
+
+
 
 mainLoop:
 				JSR getKeyboardCommand
+				INC counter0
+				LDA counter0
+				CMP #255
+				BNE mainLoop
+				CLR counter0
+				
+				INC counter1
+				LDA counter1
+				CMP #1
+				BEQ on1
+				CMP #20
+				BEQ on20
+				CMP #25
+				BEQ on25
+				CMP #35
+				BEQ on35
+				BRA mainLoop ; if it's none of the require, loop again
+				on1:
+					JSR sendToLCD
+					BRA mainLoop
+				on20:
+					LDA state
+					CMP #0
+					BEQ mainLoop ; if state 0, we don't need to bother with the RTC
+					JSR resetRTCAddress
+					BRA mainLoop
+				on25:
+					LDA state
+					CMP #0
+					BEQ mainLoop ; if state 0, we don't need to bother with the RTC
+					JSR readFromRTC
+					BRA mainLoop
+				on35:
+					;JSR getTemperature
+					CLR counter1
+					BRA mainLoop
 				
 				BRA mainLoop
 
-
 getKeyboardCommand:
-				JSR keyboardEnable
-				LDA keyboard
-				CMP #$0 ; turn off
-				BEQ setOffState
-				CMP #$1 ; set to heat
-				BEQ setHeatState
-				CMP #$2 ; set to cool
-				BEQ setCoolState
+				JSR getKeyboardInput
+				LDA keyboard_placeholder
+				CMP #0
+				BNE keyboard_triggered ; immediately take care of state change
+				
+				RTS ; otherwise go back to the main loop
+				keyboard_triggered:
+					LDA keyboard
+					CMP #$0 ; turn off
+					BEQ setOffState
+					CMP #$1 ; set to heat
+					BEQ setHeatState
+					CMP #$2 ; set to cool
+					BEQ setCoolState
 				RTS
 				
 setOffState:
 				CLRA
 				STA state
-				INC time_placed_flag
 				
 				; Turn off heater/cooler
 				MOV #$10, IIC_addr   ;set slave address
@@ -131,12 +170,12 @@ setHeatState:
 				LDA #0
 				STA seconds ; reset seconds
 				JSR resetRTC
+				INC update_seconds
 
 				; Turn on heater
 				MOV #$10, IIC_addr   ;set slave address
 				LDA #1   ;set message length to 1 byte
 				STA msgLength
-				STA time_placed_flag
 				CLRA
 				CLRX
 				CLRH
@@ -155,12 +194,12 @@ setCoolState:
 				LDA #0
 				STA seconds ; reset seconds
 				JSR resetRTC
+				INC update_seconds
 				
 				; Turn on cooler
 				MOV #$10, IIC_addr   ;set slave address
 				LDA #2   ;set message length to 1 byte
 				STA msgLength
-				STA time_placed_flag
 				CLRA
 				CLRX
 				CLRH
@@ -174,19 +213,48 @@ setCoolState:
 				JSR sendToLCD	
 				RTS
 				
-resetRTC:
+sendToLCD:		
+				LDA #3   ;set message length to 6 bytes
+				STA msgLength
+				
 				CLRX
 				CLRH
-				CLRA
-				reset_loop:
-					STA time_array,X
-					INCX
-					CPX #6
-					BNE reset_loop
-				JSR setTimeToRTC
+				LDA state
+				STA IIC_msg,X
+				INCX
+				LDA t92
+				STA IIC_msg,X
+				INCX
+				LDA seconds
+				STA IIC_msg,X
+				MOV #$20, IIC_addr   ;set slave address
+				
+				JSR IIC_DataWrite    ;begin data transfer
+				RTS
+
+;-------------------------------------------------------------
+getTemperature:
+				MOV #%1001001, IIC_addr
+				LDA #2
+				STA msgLength
+				JSR IIC_DataWrite
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				CLRX
+				CLRH
+				LDA IIC_msg,X
+				STA t92,X
+				INCX
+				LDA IIC_msg,X
+				STA t92,X
 				RTS
 				
-setTimeToRTC:
+;-------------------------------------------------------------
+			
+;write time_array to rtc and then jsr resetRTC			
+writeToRTC:
 				MOV #%11010000, IIC_addr
 				
 				LDA #8   ;set message length to 7 bytes
@@ -226,66 +294,19 @@ setTimeToRTC:
 				
 				RTS
 				
-keyboardEnable:
-				LDA PTBD
-				AND #%11000011
-				STA PTBD
-				
-				LDA #%0 ;clear flag
-				STA keyboard_placeholder
-				
-				BSET 2, PTBD
-				JSR KEYBOARD_DELAY
-				BCLR 2, PTBD
-				
-				BSET 3, PTBD
-				JSR KEYBOARD_DELAY
-				BCLR 3, PTBD
-				
-				BSET 4, PTBD
-				JSR KEYBOARD_DELAY
-				BCLR 4, PTBD
-				
-				BSET 5, PTBD
-				JSR KEYBOARD_DELAY
-				BCLR 5, PTBD
-				
-				LDA keyboard_placeholder
-				CMP #0
-				BNE keyboardTriggered
-				
-				LDA time_placed_flag
-				CMP #0
-				BEQ keyboardEnable ; if time hasn't been set, wait for that
-				
-				inc time_placed_flag
-				JSR updateFromRTC
-				BRA keyboardEnable
-				
-keyboardTriggered:
-				JSR LONG_DELAY
-				JSR LONG_DELAY
-				rts
-				
-finished:
-				RTS
-				
-resetRTCAddress:
-				MOV #%11010000, IIC_addr ;reset address pointer
-				LDA #1   ;set message length to 1 bytes
+;send read command, wait until data is recieved, then save data into time_array
+readFromRTC:
+				LDA #$08 ; we want 8 bytes of data back
 				STA msgLength
-				CLRA
-				CLRX
-				STA IIC_msg,X
+				MOV #%11010001, IIC_addr
 				JSR IIC_DataWrite
-				
-				RTS
-				
-saveRTCData:
-				LDA state
-				CMP #0
-				BEQ finished
-				CLR time_placed_flag2
+				JSR DELAY ;wait until data has returned
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY
+				JSR DELAY ;this may not work because of timings with ptb registers...
 				CLRX
 				CLRH
 				LDA IIC_msg,X
@@ -312,55 +333,70 @@ saveRTCData:
 				LDA IIC_msg,X
 				DECX
 				STA time_array,X
-				JSR sendToLCD
 				RTS
-				
-sendToLCD:		
-				LDA #3   ;set message length to 6 bytes
-				STA msgLength
-				
+
+;set RTC to 00:00:00-00/00/00
+resetRTC:
 				CLRX
 				CLRH
-				LDA state
-				STA IIC_msg,X
-				INCX
-				LDA t92
-				STA IIC_msg,X
-				INCX
-				LDA seconds
-				STA IIC_msg,X
-				MOV #$20, IIC_addr   ;set slave address
-				
-				JSR IIC_DataWrite    ;begin data transfer
+				CLRA
+				reset_loop:
+					STA time_array,X
+					INCX
+					CPX #6
+					BNE reset_loop
+				JSR writeToRTC
 				RTS
 				
-updateFromRTC:
-				LDA time_placed_flag
-				CMP #255
-				BNE finished ; only update from rtc every 255 * 255 cycles
-
-				CLR time_placed_flag
-				INC time_placed_flag ; stay inside timeset state
-
-				INC time_placed_flag2
-				LDA time_placed_flag2
-				CMP #40
-				BEQ resetRTCAddress ; reset the address for the upcoming read
-				CMP #65
-				BEQ saveRTCData
-				CMP #60
-				BNE finished
-				
-				LDA state
-				CMP #0
-				BEQ sendToLCD
-				
-				LDA #$08 ; we want 8 bytes of data back
+;reset address pointer to 0x00
+resetRTCAddress:
+				MOV #%11010000, IIC_addr ;reset address pointer
+				LDA #1   ;set message length to 1 bytes
 				STA msgLength
-				MOV #%11010001, IIC_addr
+				CLRA
+				CLRX
+				STA IIC_msg,X
 				JSR IIC_DataWrite
+				
+				RTS
+
+;-------------------------------------------------------------
+
+
+				
+;-------------------------------------------------------------
+;one iteration through powering ptb
+getKeyboardInput:
+				LDA PTBD
+				AND #%11000011
+				STA PTBD
+				
+				LDA #%0 ;clear flag
+				STA keyboard_placeholder
+				
+				BSET 2, PTBD
+				JSR KEYBOARD_DELAY
+				BCLR 2, PTBD
+				
+				BSET 3, PTBD
+				JSR KEYBOARD_DELAY
+				BCLR 3, PTBD
+				
+				BSET 4, PTBD
+				JSR KEYBOARD_DELAY
+				BCLR 4, PTBD
+				
+				BSET 5, PTBD
+				JSR KEYBOARD_DELAY
+				BCLR 5, PTBD
+				
+				LDA keyboard_placeholder
+				CMP #0
+				BNE keyboardTriggeredDelay
+				
 				RTS
 				
+;keyboard interrupt
 _vKeyboard:
 				CLR keyboard
 				BSET 2, KBISC ;CLEAR FLAG
@@ -393,6 +429,12 @@ _vKeyboard:
 				
 				BRA Clear_Flag
 				
+;two long delays that get rid of switch bouncing
+keyboardTriggeredDelay:
+				JSR LONG_DELAY
+				JSR LONG_DELAY
+				rts			
+			
 Clear_Flag:
 				LDA keyboard_placeholder
 				INCA
@@ -616,4 +658,3 @@ LONG_DELAY:
 			RTS
 			
 RTS
-
