@@ -196,7 +196,7 @@ makeCharArrays:
 						LDA heat,X
 						BRA setState
 					setOff:
-						LDA cool,X
+						LDA off,X
 						BRA setState
 				t92_loop:
 					LDA #$20
