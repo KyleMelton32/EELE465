@@ -13,19 +13,27 @@
 	msgLength: DS.B 1
 	current: DS.B 1
 	
-	current_time_position: DS.B 1
+	current_replacement_position: DS.B 1
 	write_position: DS.B 1
 	time_write_position: DS.B 1
+	screen_write_position: DS.B 1
 
 	tens_char: DS.B 1
 	ones_char: DS.B 1
 	
-	time_array: DS.B 6 ;second, minute, hour, day, month, year
+	
+	state: DS.B 1
+	t92: DS.B 1
+	seconds: DS.B 1
+	
+	state_char: DS.B 6
+	t92_char: DS.B 3
+	seconds_char: DS.B 3
 	
 	TIME_FLAG: DS.B 1
 	IIC_FLAG: DS.B 1
 	
-	timedate: DS.B 32
+	screen: DS.B 32
 	
 	
 	ORG $E000
@@ -33,11 +41,14 @@
 E			EQU		0  ;PORTA BIT 0   
 RS			EQU		1	;PORTA BIT 1
 
-
 chars DC.B '0123456789ABCDEF'
-base DC.B 'Time is hh:mm:ssDate is mm/dd/yy'
-replacement DC.B $E, $F, $B, $C, $8, $9, $1B, $1C, $18, $19, $1E, $1F
-default_time_array DC.B $FF, $FF, $FF, $FF, $FF, $FF
+cool DC.B '  cool'
+heat DC.B '  heat'
+off DC.B  '   off'
+state_replacement DC.B $A, $B, $C, $D, $E, $F
+t92_replacement DC.B $14, $15, $16
+seconds_replacement DC.B $1B, $1C, $1D
+base DC.B 'TEC state:      T92:   K@T=   s '
 		
 main:
 	_Startup:
@@ -69,90 +80,146 @@ main:
 				CLR		PTAD
 				CLR		PTBD
 				
-				JSR resetTimeDate
-					
-				CLRH ;shift default_time_array into time_array
-				CLRX
-				loadTimeRAM:
-					LDA default_time_array,X
-					STA time_array,X
-					INCX
-					CPX #$6
-					BNE loadTimeRAM 
-					
+				JSR resetScreen
 				
 				LDA #0
 				STA IIC_FLAG
-				STA current_time_position
+				STA current_replacement_position
 				STA TIME_FLAG
 				STA time_write_position
-				
+				STA state
+				STA seconds
+				STA t92
+				STA screen_write_position
 				
 				JSR LCD_Startup
-				JSR LCD_Write_Time_Screen
+				JSR writeToScreen
 ;---------------------------------------------------------------------------
 mainLoop:
 				LDA IIC_FLAG
 				ADD #$0
-				CMP #6 ; if this doesn't work, use current instead?
+				CMP #3 ; if this doesn't work, use current instead?
 				BNE mainLoop ; no i2c change
 				CLR IIC_FLAG
-				JSR resetTimeDate
+				JSR resetScreen
 				CLRX
 				CLRH
-				readIIC_msg:
-					LDA IIC_msg,X
-					STA time_array,X
-					INCX
-					CPX #6
-					BNE readIIC_msg
-				CLR current_time_position
-				JSR writeTimeArray
+				LDA IIC_msg,X
+				STA state
+				INCX
+				LDA IIC_msg,X
+				STA t92
+				INCX
+				LDA IIC_msg,X
+				STA seconds
+				JSR writeToScreen
 				BRA mainLoop
 				
-resetTimeDate:
+resetScreen:
 				CLRH ;shift the base screen into ram to be modified
 				CLRX ;for some reason, this is required if not in debug mode
 				;when base message is stored in RAM and not in debug, it prints garbage
 				;this fixes that
 				loadRAM:
 					LDA base,X
-					STA timedate,X
+					STA screen,X
 					INCX
 					CPX #$20
 					BNE loadRAM 
 				RTS
 				
-writeTimeArray:			
-				LDX time_write_position
-				LDA time_array,X
-				JSR convertDecimalAsHexToChars ; move A into tens and ones
-				char1:
-					LDX current_time_position
-					INC current_time_position
-					LDX replacement,X
+writeToScreen:
+				JSR resetScreen
+				JSR makeCharArrays
+				CLRX
+				CLRH
+				STX current_replacement_position
+				replace_state_loop:
+					LDX current_replacement_position
+					LDA state_char,X
+					LDX state_replacement,X
+					STA screen,X
+					INC current_replacement_position
+					LDX current_replacement_position
+					CPX #$6
+					BNE replace_state_loop
+					CLR current_replacement_position
+					BRA replace_t92_loop
+				replace_t92_loop:
+					LDX current_replacement_position
+					LDA t92_char,X
+					LDX t92_replacement,X
+					STA screen,X
+					INC current_replacement_position
+					LDX current_replacement_position
+					CPX #$3
+					BNE replace_t92_loop
+					CLR current_replacement_position
+					BRA replace_seconds_loop
+				replace_seconds_loop:
+					LDX current_replacement_position
+					LDA seconds_char,X
+					LDX seconds_replacement,X
+					STA screen,X
+					INC current_replacement_position
+					LDX current_replacement_position
+					CPX #$3
+					BNE replace_seconds_loop
+					CLR current_replacement_position
+				JSR LCD_Write_Time_Screen
+				RTS 
+				
+makeCharArrays:
+				CLRX
+				CLRH
+				state_loop:
+					LDA state
+					CMP #0
+					BEQ setOff
+					CMP #1
+					BEQ setHeat
+					CMP #2
+					BEQ setCool
+					RTS ; should never hit because then we are in an invalid state
+					setState:
+						STA state_char,X
+						INCX
+						CPX #6
+						BNE state_loop
+						CLRX
+						CLRH
+						BRA t92_loop
+					setCool:
+						LDA cool,X
+						BRA setState
+					setHeat:
+						LDA heat,X
+						BRA setState
+					setOff:
+						LDA cool,X
+						BRA setState
+				t92_loop:
+					LDA #$20
+					STA t92_char,X
+					INCX
+					STA t92_char,X
+					INCX
+					STA t92_char,X
+					CLRX
+					CLRH
+				
+				seconds_loop:
+					LDA seconds
+					JSR convertDecimalAsHexToChars
 					LDA tens_char
-					CMP #$46 ; char is F and is a flag for don't actually write
-					BEQ char2 ;so lets skip to the next char
-					STA timedate,X ;tens should be written now
-				char2:
-					LDX current_time_position
-					INC current_time_position
-					LDX replacement,X
+					STA seconds_char,X
+					INCX
 					LDA ones_char
-					CMP #$46 ; char is F and is a flag for don't actually write
-					BEQ write ; so lets just write the default
-					STA timedate,X
-				write:
-					INC time_write_position
-					LDA time_write_position
-					
-					CMP #6
-					BNE writeTimeArray
-					CLR current_time_position ; we have finished, let's write to the LCD and reset
-					CLR time_write_position
-					JSR LCD_Write_Time_Screen
-					RTS
+					STA seconds_char,X
+					LDA #$20
+					INCX
+					STA seconds_char,X
+				RTS
 
 convertDecimalAsHexToChars:
 				
@@ -183,7 +250,7 @@ RETURN:
 				
 Write_Line:
 				LDX write_position
-				LDA timedate,X
+				LDA screen,X
 				JSR LCD_WRITE
 				INCX
 				STX write_position
