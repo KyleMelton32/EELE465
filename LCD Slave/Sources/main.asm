@@ -98,9 +98,12 @@ main:
 mainLoop:
 				LDA IIC_FLAG
 				ADD #$0
-				CMP #3 ; if this doesn't work, use current instead?
-				BNE mainLoop ; no i2c change
+				CMP #2 ; if this doesn't work, use current instead?
+				BLS mainLoop ; no i2c change
 				CLR IIC_FLAG
+				JSR DELAYLOOP
+				JSR DELAYLOOP
+				JSR DELAYLOOP
 				JSR resetScreen
 				CLRX
 				CLRH
@@ -113,6 +116,11 @@ mainLoop:
 				LDA IIC_msg,X
 				STA seconds
 				JSR writeToScreen
+				LDA seconds
+				CMP #0
+				BEQ mainLoop
+				NOP
+				NOP
 				BRA mainLoop
 				
 resetScreen:
@@ -211,6 +219,8 @@ makeCharArrays:
 				seconds_loop:
 					LDA seconds
 					JSR convertDecimalAsHexToChars
+					CLRX
+					CLRH
 					LDA tens_char
 					STA seconds_char,X
 					INCX
